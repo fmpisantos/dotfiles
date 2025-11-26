@@ -1,0 +1,19 @@
+[submodule "alacritty"]
+	path = alacritty
+	url = git@github.com:fmpisantos/alacritty
+[submodule "i3"]
+	path = i3
+	url = git@github.com:fmpisantos/i3
+[submodule "nvim"]
+	path = nvim
+	url = git@github.com:fmpisantos/nvim
+    branch = 0.12.0
+[submodule "rofi"]
+	path = rofi
+	url = git@github.com:fmpisantos/rofi
+[submodule "tmux"]
+	path = tmux
+	url = git@github.com:fmpisantos/tmux
+[submodule "polybar"]
+	path = polybar
+	url = git@github.com:fmpisantos/polybar
