@@ -113,6 +113,17 @@ elif [ "$PKG_MANAGER" = "pacman" ]; then
     $INSTALL_CMD fzf
 fi
 
+# Install polybar
+echo "🪟 Installing polybar..."
+if [ "$PKG_MANAGER" = "apt-get" ]; then
+    $INSTALL_CMD polybar
+elif [ "$PKG_MANAGER" = "dnf" ]; then
+    $INSTALL_CMD polybar
+elif [ "$PKG_MANAGER" = "pacman" ]; then
+    $INSTALL_CMD polybar
+fi
+
+
 # Install i3
 echo "🪟 Installing i3..."
 if [ "$PKG_MANAGER" = "apt-get" ]; then
@@ -167,6 +178,15 @@ if [ -f "$CONFIG_DIR/tmux/init.sh" ]; then
     echo "✔ tmux initialized"
 else
     echo "⚠️  tmux init.sh not found, skipping"
+fi
+
+# Run polybar init script
+if [ -f "$CONFIG_DIR/polybar/init.sh" ]; then
+    echo "🔧 Running polybar initialization..."
+    bash "$CONFIG_DIR/polybar/init.sh"
+    echo "✔ polybar initialized"
+else
+    echo "⚠️  polybar init.sh not found, skipping"
 fi
 
 # Run i3 init script
