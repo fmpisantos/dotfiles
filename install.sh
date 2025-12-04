@@ -5,6 +5,34 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 DOTFILES_DIR="$SCRIPT_DIR"
 CONFIG_DIR="$HOME/.config"
 
+# Function to install dependencies from a dependencies file
+install_dependencies() {
+    local dir="$1"
+    local deps_file="$dir/dependencies"
+    
+    if [ ! -f "$deps_file" ]; then
+        return
+    fi
+    
+    local dir_name=$(basename "$dir")
+    echo "📦 Installing dependencies for $dir_name..."
+    
+    while IFS= read -r dep || [ -n "$dep" ]; do
+        # Skip empty lines and comments
+        [[ -z "$dep" || "$dep" =~ ^[[:space:]]*# ]] && continue
+        
+        # Trim whitespace
+        dep=$(echo "$dep" | xargs)
+        
+        if command -v "$dep" &>/dev/null; then
+            echo "  ✔ $dep already installed"
+        else
+            echo "  📥 Installing $dep..."
+            $INSTALL_CMD "$dep"
+        fi
+    done < "$deps_file"
+}
+
 echo "🚀 Starting dotfiles installation..."
 
 # Detect package manager
@@ -151,6 +179,14 @@ $INSTALL_CMD rofi
 # Create config directory
 echo "📁 Creating ~/.config directory..."
 mkdir -p "$CONFIG_DIR"
+
+# Install dependencies for each config directory
+echo "🔗 Checking for dependencies in config directories..."
+for item in "$DOTFILES_DIR"/*; do
+    if [ -d "$item" ] && [ -f "$item/dependencies" ]; then
+        install_dependencies "$item"
+    fi
+done
 
 # Create symlinks
 echo "🔗 Creating symlinks..."
