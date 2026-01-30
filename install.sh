@@ -234,6 +234,15 @@ else
     echo "⚠️  i3 init.sh not found, skipping"
 fi
 
+# Run fonts script
+if [ -f "$SCRIPT_DIR/fonts.sh" ]; then
+    echo "🔧 Running fonts initialization..."
+    bash "$SCRIPT_DIR/fonts.sh"
+    echo "✔ fonts initialized"
+else
+    echo "⚠️  fonts.sh not found, skipping"
+fi
+
 echo ""
 echo "✨ Installation complete! ✨"
 echo ""
