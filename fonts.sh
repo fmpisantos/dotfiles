@@ -23,7 +23,11 @@ cleanup_cursor() {
 }
 trap cleanup_cursor EXIT INT TERM
 
-DEST_DIR="$HOME/.local/share/fonts/nerd-fonts"
+if [[ "$(uname)" == "Darwin" ]]; then
+  DEST_DIR="$HOME/Library/Fonts"
+else
+  DEST_DIR="$HOME/.local/share/fonts/nerd-fonts"
+fi
 TMPDIR=$(mktemp -d)
 mkdir -p "$DEST_DIR"
 
@@ -143,7 +147,11 @@ for f in "${FONTS[@]}"; do
 done
 
 echo "Refreshing font cache..."
-fc-cache -fv "$DEST_DIR" || fc-cache -fv || true
+if command -v fc-cache >/dev/null 2>&1; then
+  fc-cache -fv "$DEST_DIR" || fc-cache -fv || true
+else
+  echo "fc-cache not found, skipping..."
+fi
 
 # If default is empty, don't try to change the system font
 if [ -z "${default}" ]; then
