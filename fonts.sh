@@ -11,54 +11,134 @@ FONTS=(
   "BlexMono"
   "Terminess"
   "Iosevka"
-  "MonaspiceNe"
+  "Monaspice"
 )
 
 # Icons used in log output. Unicode chosen for clarity in terminals.
-ICON_LOADING="⏳"
 ICON_OK="✔"
 ICON_FAIL="✖"
+
+cleanup_cursor() {
+  tput cnorm -- normal 2>/dev/null || printf "\e[?25h"
+}
+trap cleanup_cursor EXIT INT TERM
 
 DEST_DIR="$HOME/.local/share/fonts/nerd-fonts"
 TMPDIR=$(mktemp -d)
 mkdir -p "$DEST_DIR"
 
 echo "🔧 Running fonts initialization..."
+echo "Installing fonts to: $DEST_DIR"
 echo "Using temporary dir: $TMPDIR"
+
+FONTS_JSON="$TMPDIR/fonts.json"
+
+init_fonts_data() {
+  local json_url="https://raw.githubusercontent.com/ryanoasis/nerd-fonts/master/bin/scripts/lib/fonts.json"
+  echo "  Downloading fonts metadata..."
+  if ! curl --silent --show-error --fail -L -o "$FONTS_JSON" "$json_url"; then
+    echo "  Failed to download fonts.json metadata. Falling back to simple name usage."
+    FONTS_JSON=""
+  fi
+}
+
+get_font_download_url() {
+  local name="$1"
+  local folder_name=""
+
+  # If we have the metadata, try to find the correct folder name (asset name)
+  if [ -n "$FONTS_JSON" ] && [ -f "$FONTS_JSON" ]; then
+    folder_name=$(jq -r --arg name "$name" '.fonts[] | select(.patchedName == $name or .folderName == $name) | .folderName' "$FONTS_JSON" | head -n 1)
+  fi
+
+  # Fallback: if not found or no json, assume the name provided is the asset name
+  if [ -z "$folder_name" ]; then
+    folder_name="$name"
+  fi
+
+  echo "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/${folder_name}.zip"
+}
+
+init_fonts_data
 
 download_and_extract() {
   local name="$1"
-  local asset="${name}.zip"
-  local url="https://github.com/ryanoasis/nerd-fonts/releases/latest/download/${asset}"
+  local url
+  url=$(get_font_download_url "$name")
+  local asset
+  asset=$(basename "$url")
 
-  # Print a compact loading line for this font
-  printf "  [%s] %s\n" "$ICON_LOADING" "$name"
+  # Run the download and extraction in the background
+  (
+    # Redirect stdout/stderr to null, errors captured to files
+    exec >/dev/null 2>&1
 
-  # Download quietly but capture error output so we can show a useful message on failure
-  if ! curl --silent --show-error --fail -L -o "$TMPDIR/$asset" "$url" 2>"$TMPDIR/${name}.curl.err"; then
+    # Download
+    if ! curl --silent --show-error --fail -L -o "$TMPDIR/$asset" "$url" 2>"$TMPDIR/${name}.curl.err"; then
+      exit 10
+    fi
+
+    # Extract
+    if ! unzip -q -o "$TMPDIR/$asset" -d "$TMPDIR/$name"; then
+      exit 11
+    fi
+
+    # Install
+    find "$TMPDIR/$name" -type f \( -iname '*.ttf' -o -iname '*.otf' \) -print0 | xargs -0 -I{} cp -f "{}" "$DEST_DIR/"
+  ) &
+  local pid=$!
+
+  # Animation loop
+  local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+  tput civis -- invisible 2>/dev/null || printf "\e[?25l"
+
+  while kill -0 "$pid" 2>/dev/null; do
+    local frame="${spinstr:0:1}"
+    printf "\r  [%s] %s" "$frame" "$name"
+    spinstr="${spinstr:1}${spinstr:0:1}"
+    sleep 0.1
+  done
+
+  tput cnorm -- normal 2>/dev/null || printf "\e[?25h"
+  wait "$pid"
+  local exit_code=$?
+
+  # Clear the line to prepare for final status
+  printf "\r\033[K"
+
+  if [ $exit_code -eq 0 ]; then
+    # Count installed files from the extraction dir
+    local count
+    count=$(find "$TMPDIR/$name" -type f \( -iname '*.ttf' -o -iname '*.otf' \) | wc -l | tr -d ' ')
+    printf "  [%s] %s - installed %d font(s)\n" "$ICON_OK" "$name" "$count"
+    return 0
+  elif [ $exit_code -eq 10 ]; then
+    local err
     err=$(cat "$TMPDIR/${name}.curl.err" 2>/dev/null || echo "download failed")
     printf "  [%s] %s - %s\n" "$ICON_FAIL" "$name" "$err"
     return 1
-  fi
-
-  # Extract and copy fonts. Suppress per-file verbose output and display a concise success line.
-  if ! unzip -q -o "$TMPDIR/$asset" -d "$TMPDIR/$name"; then
+  elif [ $exit_code -eq 11 ]; then
     printf "  [%s] %s - failed to extract %s\n" "$ICON_FAIL" "$name" "$asset"
     return 1
+  else
+    printf "  [%s] %s - unknown error\n" "$ICON_FAIL" "$name"
+    return 1
   fi
+}
 
-  # Copy font files and count how many were installed
-  count=0
-  while IFS= read -r -d '' file; do
-    cp -f -- "$file" "$DEST_DIR/"
-    count=$((count + 1))
-  done < <(find "$TMPDIR/$name" -type f \( -iname '*.ttf' -o -iname '*.otf' \) -print0)
-
-  printf "  [%s] %s - installed %d font(s)\n" "$ICON_OK" "$name" "$count"
-  return 0
+is_installed() {
+  local name="$1"
+  if [ -d "$DEST_DIR" ] && find "$DEST_DIR" -type f \( -iname "*${name}*.ttf" -o -iname "*${name}*.otf" \) -print -quit | grep -q .; then
+    return 0
+  fi
+  return 1
 }
 
 for f in "${FONTS[@]}"; do
+  if is_installed "$f"; then
+    printf "  [%s] %s - already installed\n" "$ICON_OK" "$f"
+    continue
+  fi
   download_and_extract "$f" || true
 done
 
