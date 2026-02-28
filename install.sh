@@ -129,11 +129,11 @@ if [ "$INSTALL_NEOVIM" = true ]; then
         echo "✔ bob already installed"
     fi
 
-    # Install Neovim 0.12.0 with bob
-    echo "📝 Installing Neovim 0.12.0 with bob..."
-    bob install 0.12.0
-    bob use 0.12.0
-    echo "✔ Neovim 0.12.0 installed and set as default"
+    # Install Neovim nightly with bob
+    echo "📝 Installing Neovim nightly with bob..."
+    bob install nightly
+    bob use nightly
+    echo "✔ Neovim nightly installed and set as default"
 fi
 
 # Install ripgrep
