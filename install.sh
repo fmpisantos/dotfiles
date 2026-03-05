@@ -23,6 +23,29 @@ INSTALL_ROFI=true
 INSTALL_FONTS=true
 # ──────────────────────────────────────────────────────────────
 
+# ──────────────────────────────────────────────────────────────
+# Helper: append a line to the user's shell rc file if not already present.
+# Uses ~/.zshrc if zsh is being installed or is the current shell,
+# otherwise falls back to ~/.bashrc.
+# ──────────────────────────────────────────────────────────────
+append_to_shell_rc() {
+    local line="$1"
+    local rc_file
+
+    if [ "$INSTALL_ZSH" = true ] || [ "$SHELL" = "$(which zsh 2>/dev/null)" ]; then
+        rc_file="$HOME/.zshrc"
+    else
+        rc_file="$HOME/.bashrc"
+    fi
+
+    if ! grep -qF "$line" "$rc_file" 2>/dev/null; then
+        echo "$line" >> "$rc_file"
+        echo "  ✔ Added to $rc_file: $line"
+    else
+        echo "  ✔ Already in $rc_file: $line"
+    fi
+}
+
 # Function to install dependencies from a dependencies file
 install_dependencies() {
     local dir="$1"
@@ -106,21 +129,21 @@ if [ "$INSTALL_RUST" = true ]; then
     echo "🦀 Installing Rust..."
     if ! command -v rustc &>/dev/null; then
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        # Source for the remainder of this script
         source "$HOME/.cargo/env"
         echo "✔ Rust installed"
     else
         echo "✔ Rust already installed"
     fi
 
-    # Ensure cargo is in PATH
+    # Persist cargo bin to the user's shell rc
+    append_to_shell_rc 'export PATH="$HOME/.cargo/bin:$PATH"'
+    # Also export for the rest of this script session
     export PATH="$HOME/.cargo/bin:$PATH"
 fi
 
 # Install bob (Neovim version manager) and Neovim
 if [ "$INSTALL_NEOVIM" = true ]; then
-    # Ensure cargo is in PATH (needed for bob)
-    export PATH="$HOME/.cargo/bin:$PATH"
-
     echo "📦 Installing bob..."
     if ! command -v bob &>/dev/null; then
         cargo install --git https://github.com/MordechaiHadad/bob.git
@@ -133,6 +156,11 @@ if [ "$INSTALL_NEOVIM" = true ]; then
     echo "📝 Installing Neovim nightly with bob..."
     bob install nightly
     bob use nightly
+
+    # bob places the active nvim binary in ~/.local/share/bob/nvim-bin
+    append_to_shell_rc 'export PATH="$HOME/.local/share/bob/nvim-bin:$PATH"'
+    export PATH="$HOME/.local/share/bob/nvim-bin:$PATH"
+
     echo "✔ Neovim nightly installed and set as default"
 fi
 
@@ -188,7 +216,6 @@ if [ "$INSTALL_POLYBAR" = true ]; then
     fi
 fi
 
-
 # Install i3
 if [ "$INSTALL_I3" = true ]; then
     echo "🪟 Installing i3..."
@@ -217,6 +244,15 @@ fi
 if [ "$INSTALL_ROFI" = true ]; then
     echo "🚀 Installing rofi..."
     $INSTALL_CMD rofi
+fi
+
+# Initialize and update git submodules (nvim, tmux configs, etc.)
+echo "📦 Initializing git submodules..."
+if [ -f "$DOTFILES_DIR/.gitmodules" ]; then
+    git -C "$DOTFILES_DIR" submodule update --init --recursive
+    echo "✔ Submodules initialized"
+else
+    echo "⚠️  No .gitmodules found, skipping submodule init"
 fi
 
 # Create config directory
@@ -300,7 +336,7 @@ echo ""
 echo "📝 Notes:"
 echo "  • zsh will be your default shell after you log out and back in"
 echo "  • Rust and cargo are available in ~/.cargo/bin"
-echo "  • Neovim 0.12.0 is managed by bob"
+echo "  • Neovim nightly is managed by bob (~/.local/share/bob/nvim-bin)"
 echo "  • Run 'bob list' to see installed Neovim versions"
 echo ""
 echo "🔄 Please restart your terminal or run: source ~/.zshrc"
