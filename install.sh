@@ -108,6 +108,7 @@ if [ "$INSTALL_ZSH" = true ]; then
     echo "🔧 Setting zsh as default shell..."
     if [ "$SHELL" != "$(which zsh)" ]; then
         chsh -s "$(which zsh)"
+        cp ~/.bashrc ~/.zshrc
         echo "✔ zsh is now the default shell (will take effect on next login)"
     else
         echo "✔ zsh is already the default shell"
