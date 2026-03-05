@@ -1,0 +1,164 @@
+set $mod Mod1
+exec --no-startup-id xrandr --output DP-1-1 --primary --auto --left-of eDP-1 --auto
+
+font pango:monospace 8
+
+floating_modifier $mod
+
+bindsym $mod+Return exec alacritty
+
+bindsym Mod4+q kill
+
+bindsym Mod4+space exec rofi -show run
+
+# Change focus 
+bindsym $mod+Control+h focus left
+bindsym $mod+Control+j focus down
+bindsym $mod+Control+k focus up
+bindsym $mod+Control+l focus right
+
+# Move focused window
+bindsym $mod+Shift+h move left
+bindsym $mod+Shift+j move down
+bindsym $mod+Shift+k move up
+bindsym $mod+Shift+l move right
+
+# Split orientation
+bindsym $mod+h split h
+bindsym $mod+v split v
+bindsym $mod+q split toggle
+
+# Fullscreen
+bindsym $mod+comma fullscreen toggle
+
+# Change container layout
+bindsym $mod+s layout stacking
+bindsym $mod+w layout tabbed
+bindsym $mod+e layout toggle split
+
+# Toggle tiling/floating
+bindsym $mod+Shift+space floating toggle
+
+# Focus the parent container
+bindsym $mod+a focus parent
+
+# Focus the child container
+bindsym $mod+z focus child
+
+# Resize mode
+bindsym $mod+r mode "resize"
+mode "resize" {
+    bindsym h resize shrink width 10 px or 10 ppt
+        bindsym j resize grow height 10 px or 10 ppt
+        bindsym k resize shrink height 10 px or 10 ppt
+        bindsym l resize grow width 10 px or 10 ppt
+
+        bindsym period resize shrink width 50 px or 50 ppt
+        bindsym comma resize grow width 50 px or 50 ppt
+
+        bindsym Return mode "default"
+        bindsym Escape mode "default"
+}
+
+# Workspaces
+set $ws1 "1"
+set $ws2 "2"
+set $ws3 "3"
+set $ws4 "4"
+set $ws5 "5"
+set $ws6 "6"
+set $ws7 "7"
+set $ws8 "8"
+set $ws9 "9"
+set $ws0 "0"
+set $wsB "B"
+set $wsC "C"
+set $wsG "G"
+set $wsM "M"
+set $wsP "P"
+set $wsT "T"
+
+# Switch to workspace
+bindsym $mod+1 workspace $ws1
+bindsym $mod+2 workspace $ws2
+bindsym $mod+3 workspace $ws3
+bindsym $mod+4 workspace $ws4
+bindsym $mod+5 workspace $ws5
+bindsym $mod+6 workspace $ws6
+bindsym $mod+7 workspace $ws7
+bindsym $mod+8 workspace $ws8
+bindsym $mod+9 workspace $ws9
+bindsym $mod+0 workspace $ws0
+bindsym $mod+b workspace $wsB
+bindsym $mod+c workspace $wsC
+bindsym $mod+g workspace $wsG
+bindsym $mod+m workspace $wsM
+bindsym $mod+p workspace $wsP
+bindsym $mod+t workspace $wsT
+
+# Move focused container to workspace
+bindsym $mod+Shift+1 move container to workspace $ws1
+bindsym $mod+Shift+2 move container to workspace $ws2
+bindsym $mod+Shift+3 move container to workspace $ws3
+bindsym $mod+Shift+4 move container to workspace $ws4
+bindsym $mod+Shift+5 move container to workspace $ws5
+bindsym $mod+Shift+6 move container to workspace $ws6
+bindsym $mod+Shift+7 move container to workspace $ws7
+bindsym $mod+Shift+8 move container to workspace $ws8
+bindsym $mod+Shift+9 move container to workspace $ws9
+bindsym $mod+Shift+0 move container to workspace $ws0
+bindsym $mod+Shift+b move container to workspace $wsB
+bindsym $mod+Shift+c move container to workspace $wsC
+bindsym $mod+Shift+g move container to workspace $wsG
+bindsym $mod+Shift+m move container to workspace $wsM
+bindsym $mod+Shift+p move container to workspace $wsP
+bindsym $mod+Shift+t move container to workspace $wsT
+
+# Workspace back and forth
+bindsym $mod+Tab workspace back_and_forth
+
+# Move workspace to output
+bindsym $mod+Shift+Tab move workspace to output right
+
+# Reload config
+# bindsym $mod+Shift+c reload
+
+# Restart i3
+# bindsym $mod+Shift+r restart
+
+# Exit i3
+# bindsym $mod+l exec "i3-msg exit"
+
+# Resize window
+bindsym $mod+Shift+period resize shrink width 50 px or 50 ppt
+bindsym $mod+Shift+comma resize grow width 50 px or 50 ppt
+
+# Gaps (similar to AeroSpace gaps)
+# gaps inner 6
+# gaps outer 6
+
+# Mouse follows focus
+focus_follows_mouse yes
+
+# Default layout
+workspace_layout default
+
+for_window [class=".*"] border pixel 1
+
+exec --no-startup-id ~/.config/i3/workspace-app-launcher.sh
+exec --no-startup-id nm-applet
+exec --no-startup-id blueman-applet
+exec --no-startup-id volumeicon
+bindsym Mod4+l exec i3lock -c 000000
+
+client.focused          #4c7899 #285577 #ffffff #2e9ef4   #285577
+client.focused_inactive #333333 #5f676a #ffffff #484e50   #5f676a
+client.unfocused        #333333 #222222 #888888 #292d2e   #222222
+client.urgent           #2f343a #900000 #ffffff #900000   #900000
+client.placeholder      #000000 #0c0c0c #ffffff #000000   #0c0c0c
+
+bar {
+    position top
+    status_command i3status
+    tray_output primary
+}
