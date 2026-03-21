@@ -1,0 +1,48 @@
+# Editors
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# OS
+.DS_Store
+ehthumbs.db
+Icon?
+__MACOSX
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Dependency directories
+node_modules/
+jspm_packages/
+bower_components/
+vendor/
+bundler_gems/
+Pods/
+.helm/
+
+# Build outputs
+/dist/
+/build/
+/out/
+/coverage/
+.nyc_output/
+.cache/
+.tmp/
+.temp/
+
+# Misc
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+.sentryclirc
+npmrc
+yarn.lock
+package-lock.json
+pnpm-lock.yaml

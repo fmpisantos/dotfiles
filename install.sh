@@ -271,7 +271,7 @@ mkdir -p "$CONFIG_DIR"
 
 # Install dependencies for each config directory
 echo "🔗 Checking for dependencies in config directories..."
-for item in "$DOTFILES_DIR"/*; do
+for item in "$DOTFILES_DIR/config/"/*; do
     if [ -d "$item" ] && [ -f "$item/dependencies" ]; then
         install_dependencies "$item"
     fi
