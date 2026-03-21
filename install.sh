@@ -249,11 +249,20 @@ fi
 
 # Initialize and update git submodules (nvim, tmux configs, etc.)
 echo "📦 Initializing git submodules..."
-if [ -f "$DOTFILES_DIR/.gitmodules" ]; then
-    git -C "$DOTFILES_DIR" submodule update --init --recursive
-    echo "✔ Submodules initialized"
+
+# Use a temporary git configuration to prefer HTTPS for github.com URLs
+# for the submodule init step only — this does NOT modify the user's global
+# git config and therefore is automatically scoped to this command.
+if command -v git &>/dev/null; then
+    if [ -f "$DOTFILES_DIR/.gitmodules" ]; then
+        echo "🔐 Initializing submodules using HTTPS for github.com URLs (temporary)..."
+        git -c 'url."https://github.com/".insteadOf=git@github.com:' -C "$DOTFILES_DIR" submodule update --init --recursive
+        echo "✔ Submodules initialized using temporary HTTPS override"
+    else
+        echo "⚠️  No .gitmodules found, skipping submodule init"
+    fi
 else
-    echo "⚠️  No .gitmodules found, skipping submodule init"
+    echo "⚠️  git not found; skipping submodule init"
 fi
 
 # Create config directory
