@@ -152,16 +152,16 @@ if [ "$INSTALL_NEOVIM" = true ]; then
         echo "✔ bob already installed"
     fi
 
-    # Install Neovim nightly with bob
-    echo "📝 Installing Neovim nightly with bob..."
-    bob install nightly
-    bob use nightly
+    # Install Neovim v0.12.1 with bob
+    echo "📝 Installing Neovim v0.12.1 with bob..."
+    bob install v0.12.1
+    bob use v0.12.1
 
     # bob places the active nvim binary in ~/.local/share/bob/nvim-bin
     append_to_shell_rc 'export PATH="$HOME/.local/share/bob/nvim-bin:$PATH"'
     export PATH="$HOME/.local/share/bob/nvim-bin:$PATH"
 
-    echo "✔ Neovim nightly installed and set as default"
+    echo "✔ Neovim v0.12.1 installed and set as default"
 fi
 
 # Install ripgrep
