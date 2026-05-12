@@ -432,6 +432,26 @@ new-agent() {
         return 1
     fi
 
+    # Sanitize name into a git-branch-friendly slug.
+    # Replaces whitespace with underscores, strips characters disallowed
+    # by git-check-ref-format, collapses repeats, and trims leading/trailing
+    # separators and dots.
+    local original_name="$name"
+    name=$(printf '%s' "$name" | tr '[:space:]' '_')
+    name=$(printf '%s' "$name" | tr -d '~^:?*[\\')
+    name=$(printf '%s' "$name" | tr -cd '[:alnum:]_./-')
+    name=$(printf '%s' "$name" | sed -e 's/\.\.\+/./g' -e 's|//\+|/|g' -e 's/__\+/_/g')
+    name=$(printf '%s' "$name" | sed -e 's|^[-./_]\+||' -e 's|[-./_]\+$||')
+
+    if [[ -z "$name" ]]; then
+        echo "Name became empty after sanitization"
+        return 1
+    fi
+
+    if [[ "$name" != "$original_name" ]]; then
+        echo "Sanitized name: '$original_name' → '$name'"
+    fi
+
     git worktree add "../$name" -b "$name" || return 1
     cd "../$name" || return 1
     claude
