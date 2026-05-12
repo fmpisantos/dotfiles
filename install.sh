@@ -390,10 +390,22 @@ close-agent() {
         claude "Commit the files that are not committed with a good message"
     fi
 
-    local worktree_path main_worktree
+    local worktree_path main_worktree branch_name
     worktree_path=$(git rev-parse --show-toplevel)
+    branch_name=$(git rev-parse --abbrev-ref HEAD)
     main_worktree=$(git worktree list | head -n 1 | awk '{print $1}')
+
+    if [[ "$branch_name" == "master" || "$branch_name" == "HEAD" ]]; then
+        echo "Refusing to merge: worktree is not on a feature branch (current: $branch_name)"
+        return 1
+    fi
+
     cd "$main_worktree" 2>/dev/null || cd ..
+    git checkout master || return 1
+    git pull --ff-only origin master || return 1
+    git merge --no-ff "$branch_name" || { echo "Merge failed; resolve conflicts and finish manually"; return 1; }
+    git push origin master || return 1
+
     git worktree remove "$worktree_path"
 }
 
