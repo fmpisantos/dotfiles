@@ -46,6 +46,26 @@ append_to_shell_rc() {
     fi
 }
 
+# ──────────────────────────────────────────────────────────────
+# Helper: append a multi-line block to BOTH ~/.zshrc and ~/.bashrc.
+# A marker line is used to avoid appending the block more than once.
+# ──────────────────────────────────────────────────────────────
+append_block_to_shell_rcs() {
+    local marker="$1"
+    local block="$2"
+    local rc_file
+
+    for rc_file in "$HOME/.zshrc" "$HOME/.bashrc"; do
+        touch "$rc_file"
+        if grep -qF "$marker" "$rc_file" 2>/dev/null; then
+            echo "  ✔ Block already in $rc_file ($marker)"
+        else
+            printf '\n%s\n%s\n' "$marker" "$block" >> "$rc_file"
+            echo "  ✔ Added block to $rc_file ($marker)"
+        fi
+    done
+}
+
 # Function to install dependencies from a dependencies file
 install_dependencies() {
     local dir="$1"
@@ -338,6 +358,75 @@ if [ "$INSTALL_FONTS" = true ]; then
         echo "⚠️  fonts.sh not found, skipping"
     fi
 fi
+
+# ──────────────────────────────────────────────────────────────
+# Install git worktree "agent" helper functions into both
+# ~/.zshrc and ~/.bashrc.
+# ──────────────────────────────────────────────────────────────
+echo "🧩 Installing agent helper functions into shell rc files..."
+AGENT_FUNCTIONS_BLOCK=$(cat <<'AGENT_FUNCTIONS_EOF'
+list-agents() {
+    local selected path
+    selected=$(git worktree list | fzf) || return
+    path="${selected%% *}"
+    [[ -d "$path" ]] && cd "$path"
+}
+
+close-agent() {
+    local git_dir common_dir
+    git_dir=$(git rev-parse --git-dir 2>/dev/null) || { echo "Not in a git repository"; return 1; }
+    common_dir=$(git rev-parse --git-common-dir 2>/dev/null)
+
+    local abs_git_dir abs_common_dir
+    abs_git_dir=$(cd "$git_dir" 2>/dev/null && pwd)
+    abs_common_dir=$(cd "$common_dir" 2>/dev/null && pwd)
+
+    if [[ "$abs_git_dir" == "$abs_common_dir" ]]; then
+        echo "Not in a worktree (this is the main repository)"
+        return 1
+    fi
+
+    if ! git diff --quiet || ! git diff --cached --quiet || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
+        claude "Commit the files that are not committed with a good message"
+    fi
+
+    local worktree_path main_worktree
+    worktree_path=$(git rev-parse --show-toplevel)
+    main_worktree=$(git worktree list | head -n 1 | awk '{print $1}')
+    cd "$main_worktree" 2>/dev/null || cd ..
+    git worktree remove "$worktree_path"
+}
+
+new-agent() {
+    local main_worktree
+    main_worktree=$(git worktree list | head -n 1 | awk '{print $1}')
+    if [[ -z "$main_worktree" ]]; then
+        echo "Not in a git repository"
+        return 1
+    fi
+
+    cd "$main_worktree" || return 1
+    git checkout master || return 1
+    git pull || return 1
+
+    local name
+    if [ -n "$ZSH_VERSION" ]; then
+        read "name?Worktree name: "
+    else
+        read -r -p "Worktree name: " name
+    fi
+    if [[ -z "$name" ]]; then
+        echo "Name required"
+        return 1
+    fi
+
+    git worktree add "../$name" -b "$name" || return 1
+    cd "../$name" || return 1
+    claude
+}
+AGENT_FUNCTIONS_EOF
+)
+append_block_to_shell_rcs "# >>> dotfiles: agent worktree helpers >>>" "$AGENT_FUNCTIONS_BLOCK"
 
 echo ""
 echo "✨ Installation complete! ✨"
