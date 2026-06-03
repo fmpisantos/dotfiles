@@ -454,6 +454,15 @@ new-agent() {
 
     git worktree add "../$name" -b "$name" || return 1
     cd "../$name" || return 1
+
+    # If we're inside tmux, rename the current window to the branch name.
+    # Disable automatic-rename so the title sticks instead of being
+    # overwritten by the running command.
+    if [[ -n "$TMUX" ]]; then
+        tmux set-window-option automatic-rename off >/dev/null 2>&1
+        tmux rename-window "$name" >/dev/null 2>&1
+    fi
+
     claude
 }
 AGENT_FUNCTIONS_EOF
