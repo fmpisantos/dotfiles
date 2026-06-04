@@ -11,7 +11,7 @@ CONFIG_DIR="$HOME/.config"
 # ──────────────────────────────────────────────────────────────
 INSTALL_ZSH=true
 INSTALL_RUST=true
-INSTALL_NEOVIM=true       # requires rust (bob is built with cargo)
+INSTALL_NEOVIM=true # requires rust (bob is built with cargo)
 INSTALL_RIPGREP=true
 INSTALL_FD=true
 INSTALL_TMUX=true
@@ -21,6 +21,7 @@ INSTALL_I3=true
 INSTALL_ALACRITTY=true
 INSTALL_ROFI=true
 INSTALL_FONTS=true
+INSTALL_LSD=true # alternative to ls
 # ──────────────────────────────────────────────────────────────
 
 # ──────────────────────────────────────────────────────────────
@@ -75,7 +76,8 @@ install_dependencies() {
         return
     fi
     
-    local dir_name=$(basename "$dir")
+    local dir_name
+    dir_name=$(basename "$dir")
     echo "📦 Installing dependencies for $dir_name..."
     
     while IFS= read -r dep || [ -n "$dep" ]; do
@@ -96,8 +98,26 @@ install_dependencies() {
 
 echo "🚀 Starting dotfiles installation..."
 
-# Detect package manager
-if command -v apt-get &>/dev/null; then
+# Detect operating system and package manager
+IS_MACOS=false
+if [[ "$(uname)" == "Darwin" ]]; then
+    IS_MACOS=true
+    PKG_MANAGER="brew"
+    INSTALL_CMD="brew install"
+
+    # Install Homebrew if it isn't present yet.
+    if ! command -v brew &>/dev/null; then
+        echo "🍺 Homebrew not found. Installing Homebrew..."
+        NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    fi
+
+    # Load brew into the current shell session (Apple Silicon vs Intel paths).
+    if [ -x /opt/homebrew/bin/brew ]; then
+        eval "$(/opt/homebrew/bin/brew shellenv)"
+    elif [ -x /usr/local/bin/brew ]; then
+        eval "$(/usr/local/bin/brew shellenv)"
+    fi
+elif command -v apt-get &>/dev/null; then
     PKG_MANAGER="apt-get"
     INSTALL_CMD="sudo apt-get install -y"
 elif command -v dnf &>/dev/null; then
@@ -107,7 +127,7 @@ elif command -v pacman &>/dev/null; then
     PKG_MANAGER="pacman"
     INSTALL_CMD="sudo pacman -S --noconfirm"
 else
-    echo "❌ Unsupported package manager"
+    echo "❌ Unsupported package manager (need brew, apt-get, dnf, or pacman)"
     exit 1
 fi
 
@@ -117,6 +137,8 @@ echo "📦 Detected package manager: $PKG_MANAGER"
 echo "📥 Updating package lists..."
 if [ "$PKG_MANAGER" = "apt-get" ]; then
     sudo apt-get update
+elif [ "$PKG_MANAGER" = "brew" ]; then
+    brew update
 fi
 
 # Install zsh
@@ -126,9 +148,18 @@ if [ "$INSTALL_ZSH" = true ]; then
 
     # Make zsh the default shell
     echo "🔧 Setting zsh as default shell..."
-    if [ "$SHELL" != "$(which zsh)" ]; then
-        chsh -s "$(which zsh)"
-        echo "✔ zsh is now the default shell (will take effect on next login)"
+    zsh_path="$(command -v zsh)"
+    if [ "$SHELL" != "$zsh_path" ]; then
+        # chsh only accepts shells listed in /etc/shells. A brew-installed
+        # zsh (e.g. /opt/homebrew/bin/zsh) usually isn't there yet.
+        if [ -n "$zsh_path" ] && ! grep -qxF "$zsh_path" /etc/shells 2>/dev/null; then
+            echo "$zsh_path" | sudo tee -a /etc/shells >/dev/null
+        fi
+        if chsh -s "$zsh_path"; then
+            echo "✔ zsh is now the default shell (will take effect on next login)"
+        else
+            echo "⚠️  Could not change default shell automatically; run: chsh -s $zsh_path"
+        fi
     else
         echo "✔ zsh is already the default shell"
     fi
@@ -136,12 +167,18 @@ fi
 
 # Install build dependencies
 echo "🔨 Installing build dependencies..."
+# jq + unzip are needed by fonts.sh; curl/git are needed throughout.
 if [ "$PKG_MANAGER" = "apt-get" ]; then
-    $INSTALL_CMD build-essential libstdc++-10-dev curl git unzip
+    $INSTALL_CMD build-essential libstdc++-10-dev curl git unzip jq
 elif [ "$PKG_MANAGER" = "dnf" ]; then
-    $INSTALL_CMD gcc gcc-c++ make libstdc++-devel curl git unzip
+    $INSTALL_CMD gcc gcc-c++ make libstdc++-devel curl git unzip jq
 elif [ "$PKG_MANAGER" = "pacman" ]; then
-    $INSTALL_CMD base-devel curl git unzip
+    $INSTALL_CMD base-devel curl git unzip jq
+elif [ "$PKG_MANAGER" = "brew" ]; then
+    # Compiler toolchain comes from the Xcode Command Line Tools.
+    # Returns non-zero if already installed, so don't let set -e abort.
+    xcode-select --install 2>/dev/null || true
+    $INSTALL_CMD curl git unzip jq
 fi
 
 # Install Rust (if not already installed)
@@ -187,23 +224,24 @@ fi
 # Install ripgrep
 if [ "$INSTALL_RIPGREP" = true ]; then
     echo "🔍 Installing ripgrep..."
-    if [ "$PKG_MANAGER" = "apt-get" ]; then
-        $INSTALL_CMD ripgrep
-    elif [ "$PKG_MANAGER" = "dnf" ]; then
-        $INSTALL_CMD ripgrep
-    elif [ "$PKG_MANAGER" = "pacman" ]; then
-        $INSTALL_CMD ripgrep
-    fi
+    # Package is named "ripgrep" on every supported manager.
+    $INSTALL_CMD ripgrep
 fi
 
 # Install fd
 if [ "$INSTALL_FD" = true ]; then
     echo "🔎 Installing fd..."
     if [ "$PKG_MANAGER" = "apt-get" ]; then
+        # Debian/Ubuntu ship the binary as "fdfind"; symlink it to "fd".
         $INSTALL_CMD fd-find
+        mkdir -p "$HOME/.local/bin"
+        if [ -x /usr/bin/fdfind ] && [ ! -e "$HOME/.local/bin/fd" ]; then
+            ln -s /usr/bin/fdfind "$HOME/.local/bin/fd"
+        fi
+        append_to_shell_rc 'export PATH="$HOME/.local/bin:$PATH"'
     elif [ "$PKG_MANAGER" = "dnf" ]; then
         $INSTALL_CMD fd-find
-    elif [ "$PKG_MANAGER" = "pacman" ]; then
+    elif [ "$PKG_MANAGER" = "pacman" ] || [ "$PKG_MANAGER" = "brew" ]; then
         $INSTALL_CMD fd
     fi
 fi
@@ -217,53 +255,78 @@ fi
 # Install fzf
 if [ "$INSTALL_FZF" = true ]; then
     echo "🔍 Installing fzf..."
-    if [ "$PKG_MANAGER" = "apt-get" ] || [ "$PKG_MANAGER" = "dnf" ]; then
-        $INSTALL_CMD fzf
-    elif [ "$PKG_MANAGER" = "pacman" ]; then
-        $INSTALL_CMD fzf
-    fi
+    # Package is named "fzf" on every supported manager.
+    $INSTALL_CMD fzf
 fi
 
-# Install polybar
+# Install polybar (X11-only, not available on macOS)
 if [ "$INSTALL_POLYBAR" = true ]; then
-    echo "🪟 Installing polybar..."
-    if [ "$PKG_MANAGER" = "apt-get" ]; then
-        $INSTALL_CMD polybar
-    elif [ "$PKG_MANAGER" = "dnf" ]; then
-        $INSTALL_CMD polybar
-    elif [ "$PKG_MANAGER" = "pacman" ]; then
+    if [ "$IS_MACOS" = true ]; then
+        echo "⏭️  Skipping polybar (Linux/X11-only, not available on macOS)"
+    else
+        echo "🪟 Installing polybar..."
         $INSTALL_CMD polybar
     fi
 fi
 
-# Install i3
+# Install i3 (X11-only, not available on macOS)
 if [ "$INSTALL_I3" = true ]; then
-    echo "🪟 Installing i3..."
-    if [ "$PKG_MANAGER" = "apt-get" ]; then
-        $INSTALL_CMD i3
-    elif [ "$PKG_MANAGER" = "dnf" ]; then
-        $INSTALL_CMD i3
-    elif [ "$PKG_MANAGER" = "pacman" ]; then
-        $INSTALL_CMD i3-wm
+    if [ "$IS_MACOS" = true ]; then
+        echo "⏭️  Skipping i3 (Linux/X11-only, not available on macOS)"
+    else
+        echo "🪟 Installing i3..."
+        if [ "$PKG_MANAGER" = "pacman" ]; then
+            $INSTALL_CMD i3-wm
+        else
+            $INSTALL_CMD i3
+        fi
     fi
 fi
 
 # Install alacritty
 if [ "$INSTALL_ALACRITTY" = true ]; then
     echo "💻 Installing alacritty..."
-    if [ "$PKG_MANAGER" = "apt-get" ]; then
-        $INSTALL_CMD alacritty
-    elif [ "$PKG_MANAGER" = "dnf" ]; then
-        $INSTALL_CMD alacritty
-    elif [ "$PKG_MANAGER" = "pacman" ]; then
+    if [ "$PKG_MANAGER" = "brew" ]; then
+        # On macOS alacritty is distributed as a cask.
+        brew install --cask alacritty
+    elif [ "$PKG_MANAGER" = "apt-get" ]; then
+        # alacritty isn't in older Ubuntu/Debian repos. If apt can't see it,
+        # add the maintainer PPA (Ubuntu) and retry.
+        if ! apt-cache show alacritty &>/dev/null; then
+            if grep -qi ubuntu /etc/os-release 2>/dev/null; then
+                echo "  alacritty not in apt; adding ppa:aslatter/ppa..."
+                sudo apt-get install -y software-properties-common
+                sudo add-apt-repository -y ppa:aslatter/ppa
+                sudo apt-get update
+            else
+                echo "  ⚠️  alacritty not in apt and PPAs only work on Ubuntu."
+                echo "     Falling back to building from source with cargo..."
+                sudo apt-get install -y cmake pkg-config libfreetype6-dev \
+                    libfontconfig1-dev libxcb-xfixes0-dev libxkbcommon-dev python3
+                cargo install alacritty
+            fi
+        fi
+        # If we didn't build it from cargo above, install via apt now.
+        command -v alacritty &>/dev/null || $INSTALL_CMD alacritty
+    else
         $INSTALL_CMD alacritty
     fi
 fi
 
-# Install rofi
+# Install rofi (X11-only, not available on macOS)
 if [ "$INSTALL_ROFI" = true ]; then
-    echo "🚀 Installing rofi..."
-    $INSTALL_CMD rofi
+    if [ "$IS_MACOS" = true ]; then
+        echo "⏭️  Skipping rofi (Linux/X11-only, not available on macOS)"
+    else
+        echo "🚀 Installing rofi..."
+        $INSTALL_CMD rofi
+    fi
+fi
+
+# Install lsd
+if [ "$INSTALL_LSD" = true ]; then
+    echo "🚀 Installing lsd..."
+    $INSTALL_CMD lsd
 fi
 
 # Initialize and update git submodules (nvim, tmux configs, etc.)
@@ -326,8 +389,8 @@ if [ "$INSTALL_TMUX" = true ]; then
     fi
 fi
 
-# Run polybar init script
-if [ "$INSTALL_POLYBAR" = true ]; then
+# Run polybar init script (Linux/X11-only)
+if [ "$INSTALL_POLYBAR" = true ] && [ "$IS_MACOS" != true ]; then
     if [ -f "$CONFIG_DIR/polybar/init.sh" ]; then
         echo "🔧 Running polybar initialization..."
         bash "$CONFIG_DIR/polybar/init.sh"
@@ -337,8 +400,8 @@ if [ "$INSTALL_POLYBAR" = true ]; then
     fi
 fi
 
-# Run i3 init script
-if [ "$INSTALL_I3" = true ]; then
+# Run i3 init script (Linux/X11-only)
+if [ "$INSTALL_I3" = true ] && [ "$IS_MACOS" != true ]; then
     if [ -f "$CONFIG_DIR/i3/init.sh" ]; then
         echo "🔧 Running i3 initialization..."
         bash "$CONFIG_DIR/i3/init.sh"

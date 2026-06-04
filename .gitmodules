@@ -1,22 +1,3 @@
-[submodule "alacritty"]
-	path = config/alacritty
-	url = git@github.com:fmpisantos/alacritty
-[submodule "i3"]
-	path = config/i3
-	url = git@github.com:fmpisantos/i3
-[submodule "nvim"]
-	path = config/nvim
-	url = git@github.com:fmpisantos/nvim
-	branch = 0.12.0
-[submodule "rofi"]
-	path = config/rofi
-	url = git@github.com:fmpisantos/rofi
-[submodule "tmux"]
-	path = config/tmux
-	url = git@github.com:fmpisantos/tmux
-[submodule "polybar"]
-	path = config/polybar
-	url = git@github.com:fmpisantos/polybar
 [submodule "config/alacritty"]
 	path = config/alacritty
 	url = git@github.com:fmpisantos/alacritty
@@ -26,6 +7,7 @@
 [submodule "config/nvim"]
 	path = config/nvim
 	url = git@github.com:fmpisantos/nvim
+	branch = 0.12.0
 [submodule "config/polybar"]
 	path = config/polybar
 	url = git@github.com:fmpisantos/polybar
