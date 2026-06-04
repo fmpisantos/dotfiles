@@ -5,6 +5,17 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 DOTFILES_DIR="$SCRIPT_DIR"
 CONFIG_DIR="$HOME/.config"
 
+# Files the shell-rc helpers append to for zsh:
+#   ZSH_RC      → interactive rc (shell functions)  — .zshrc
+#   ZSH_PROFILE → login env (PATH / exports)        — .zprofile
+# Defaults live in $HOME. If INSTALL_ZSH is true we run config/zsh/init.sh,
+# which moves ZDOTDIR to the repo's zsh config ($XDG_CONFIG_HOME/zsh — a symlink
+# into this repo). After that zsh reads its startup files from there and ignores
+# the ones in $HOME, so both vars get repointed at $ZDOTDIR/* (the files zsh
+# actually reads; editing them there is reflected system-wide for the user).
+ZSH_RC="$HOME/.zshrc"
+ZSH_PROFILE="$HOME/.zprofile"
+
 # ──────────────────────────────────────────────────────────────
 # Application toggle list
 # Set to true/false to enable/disable installation of each app.
@@ -25,16 +36,17 @@ INSTALL_LSD=true # alternative to ls
 # ──────────────────────────────────────────────────────────────
 
 # ──────────────────────────────────────────────────────────────
-# Helper: append a line to the user's shell rc file if not already present.
-# Uses ~/.zshrc if zsh is being installed or is the current shell,
-# otherwise falls back to ~/.bashrc.
+# Helper: append an environment line (e.g. a PATH export) if not already
+# present. For zsh this targets the login profile ($ZSH_PROFILE / .zprofile),
+# since PATH/exports belong in the login shell; otherwise ~/.bashrc.
+# The grep guard makes it idempotent — the line is only added if not there yet.
 # ──────────────────────────────────────────────────────────────
 append_to_shell_rc() {
     local line="$1"
     local rc_file
 
     if [ "$INSTALL_ZSH" = true ] || [ "$SHELL" = "$(which zsh 2>/dev/null)" ]; then
-        rc_file="$HOME/.zshrc"
+        rc_file="$ZSH_PROFILE"
     else
         rc_file="$HOME/.bashrc"
     fi
@@ -48,15 +60,17 @@ append_to_shell_rc() {
 }
 
 # ──────────────────────────────────────────────────────────────
-# Helper: append a multi-line block to BOTH ~/.zshrc and ~/.bashrc.
+# Helper: append a multi-line block to BOTH the active zsh rc and ~/.bashrc.
 # A marker line is used to avoid appending the block more than once.
+# Note: the zsh target is $ZSH_RC, which is $ZDOTDIR/.zshrc once
+# config/zsh/init.sh has run (see ZSH_RC above), not necessarily $HOME/.zshrc.
 # ──────────────────────────────────────────────────────────────
 append_block_to_shell_rcs() {
     local marker="$1"
     local block="$2"
     local rc_file
 
-    for rc_file in "$HOME/.zshrc" "$HOME/.bashrc"; do
+    for rc_file in "$ZSH_RC" "$HOME/.bashrc"; do
         touch "$rc_file"
         if grep -qF "$marker" "$rc_file" 2>/dev/null; then
             echo "  ✔ Block already in $rc_file ($marker)"
@@ -179,6 +193,24 @@ elif [ "$PKG_MANAGER" = "brew" ]; then
     # Returns non-zero if already installed, so don't let set -e abort.
     xcode-select --install 2>/dev/null || true
     $INSTALL_CMD curl git unzip jq
+fi
+
+# Bootstrap the zsh configuration.
+# This must run BEFORE any append_to_shell_rc / append_block_to_shell_rcs call
+# below, because init.sh moves ZDOTDIR to the repo's zsh config. From that point
+# on zsh reads $ZDOTDIR/.zshrc and ignores $HOME/.zshrc, so we repoint ZSH_RC
+# at the file zsh will actually read. It runs after build deps so curl/git are
+# available for the starship installer fallback.
+if [ "$INSTALL_ZSH" = true ]; then
+    if [ -f "$DOTFILES_DIR/config/zsh/init.sh" ]; then
+        echo "🔧 Running zsh initialization (config/zsh/init.sh)..."
+        bash "$DOTFILES_DIR/config/zsh/init.sh"
+        ZSH_RC="$CONFIG_DIR/zsh/.zshrc"
+        ZSH_PROFILE="$CONFIG_DIR/zsh/.zprofile"
+        echo "✔ zsh initialized; env → $ZSH_PROFILE, functions → $ZSH_RC"
+    else
+        echo "⚠️  config/zsh/init.sh not found, skipping zsh bootstrap"
+    fi
 fi
 
 # Install Rust (if not already installed)
@@ -368,6 +400,14 @@ for item in "$DOTFILES_DIR"/config/*; do
     name=$(basename "$item")
     target="$CONFIG_DIR/$name"
 
+    # zsh is wired up by config/zsh/init.sh (symlinks ~/.config/zsh and
+    # ~/.zshenv). Don't double-link it here — that would back up init.sh's
+    # symlink to zsh.bak and relink it needlessly.
+    if [ "$name" = "zsh" ] && [ "$INSTALL_ZSH" = true ]; then
+        echo "  Skipping zsh (handled by config/zsh/init.sh)"
+        continue
+    fi
+
     if [ -e "$target" ] || [ -L "$target" ]; then
         echo "  Backing up $target → $target.bak"
         mv "$target" "$target.bak"
@@ -541,5 +581,10 @@ echo "  • If you want run  'cp .bash_aliases ~/'"
 echo "  • Rust and cargo are available in ~/.cargo/bin"
 echo "  • Neovim nightly is managed by bob (~/.local/share/bob/nvim-bin)"
 echo "  • Run 'bob list' to see installed Neovim versions"
+if [ "$INSTALL_ZSH" = true ]; then
+    echo "  • zsh now reads its config from \$ZDOTDIR ($CONFIG_DIR/zsh, a"
+    echo "    symlink to this repo). PATH/exports went into $ZSH_PROFILE and"
+    echo "    shell functions into $ZSH_RC."
+fi
 echo ""
-echo "🔄 Please restart your terminal or run: source ~/.zshrc"
+echo "🔄 Please restart your terminal or run: exec zsh"
