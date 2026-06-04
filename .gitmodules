@@ -17,3 +17,6 @@
 [submodule "config/tmux"]
 	path = config/tmux
 	url = git@github.com:fmpisantos/tmux
+[submodule "config/zsh"]
+	path = config/zsh
+	url = git@github.com:fmpisantos/zsh
