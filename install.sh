@@ -102,20 +102,111 @@ pkg_install() {
 }
 
 # ──────────────────────────────────────────────────────────────
+# Helper: map the host CPU to the Rust target arch used in release asset
+# names. Echoes "x86_64" / "aarch64", or empty for anything we don't ship.
+# ──────────────────────────────────────────────────────────────
+host_arch() {
+    case "$(uname -m)" in
+        x86_64|amd64)  echo x86_64 ;;
+        aarch64|arm64) echo aarch64 ;;
+        *)             echo "" ;;
+    esac
+}
+
+# ──────────────────────────────────────────────────────────────
+# Helper: resolve a GitHub repo's latest release tag via the /releases/latest
+# redirect — no API token or jq required. Echoes the tag (e.g. "15.1.0" or
+# "v10.2.0"), empty on failure.
+#   $1 = owner/repo
+# ──────────────────────────────────────────────────────────────
+github_latest_tag() {
+    curl -fsSLI -o /dev/null -w '%{url_effective}' \
+        "https://github.com/$1/releases/latest" 2>/dev/null | sed -n 's#.*/tag/##p'
+}
+
+# ──────────────────────────────────────────────────────────────
+# Helper: download a .tar.gz, extract a single binary, and install it into
+# ~/.local/bin (added to PATH). This avoids building from source with cargo,
+# which can OOM or segfault rustc on small aarch64 VMs (heavy crates like
+# regex-syntax at opt-level 3). Returns nonzero on any failure.
+#   $1 = tarball URL   $2 = binary basename inside the archive   $3 = dest name
+# ──────────────────────────────────────────────────────────────
+install_tarball_binary() {
+    local url="$1" inner="$2" dest="$3" tmp bin
+    tmp="$(mktemp -d)" || return 1
+    if ! curl -fsSL "$url" -o "$tmp/archive.tar.gz"; then rm -rf "$tmp"; return 1; fi
+    if ! tar -xzf "$tmp/archive.tar.gz" -C "$tmp"; then rm -rf "$tmp"; return 1; fi
+    bin="$(find "$tmp" -type f -name "$inner" -print -quit)"
+    if [ -z "$bin" ]; then rm -rf "$tmp"; return 1; fi
+    mkdir -p "$HOME/.local/bin"
+    if ! install -m 0755 "$bin" "$HOME/.local/bin/$dest"; then rm -rf "$tmp"; return 1; fi
+    rm -rf "$tmp"
+    append_to_shell_rc 'export PATH="$HOME/.local/bin:$PATH"'
+    export PATH="$HOME/.local/bin:$PATH"
+    return 0
+}
+
+# Prebuilt ripgrep: BurntSushi ships x86_64-musl and aarch64-gnu binaries.
+install_ripgrep_prebuilt() {
+    local arch tag target
+    arch="$(host_arch)"; [ -z "$arch" ] && return 1
+    tag="$(github_latest_tag BurntSushi/ripgrep)"; [ -z "$tag" ] && return 1
+    case "$arch" in
+        x86_64)  target="x86_64-unknown-linux-musl" ;;
+        aarch64) target="aarch64-unknown-linux-gnu" ;;
+    esac
+    install_tarball_binary \
+        "https://github.com/BurntSushi/ripgrep/releases/download/${tag}/ripgrep-${tag}-${target}.tar.gz" \
+        rg rg
+}
+
+# Prebuilt fd: sharkdp ships musl binaries for both arches (tags are vX.Y.Z).
+install_fd_prebuilt() {
+    local arch tag target
+    arch="$(host_arch)"; [ -z "$arch" ] && return 1
+    tag="$(github_latest_tag sharkdp/fd)"; [ -z "$tag" ] && return 1
+    target="${arch}-unknown-linux-musl"
+    install_tarball_binary \
+        "https://github.com/sharkdp/fd/releases/download/${tag}/fd-${tag}-${target}.tar.gz" \
+        fd fd
+}
+
+# Prebuilt lsd: lsd-rs ships musl binaries for both arches (tags are vX.Y.Z).
+# musl is statically linked, so it runs on any glibc version / distro.
+install_lsd_prebuilt() {
+    local arch tag target
+    arch="$(host_arch)"; [ -z "$arch" ] && return 1
+    tag="$(github_latest_tag lsd-rs/lsd)"; [ -z "$tag" ] && return 1
+    target="${arch}-unknown-linux-musl"
+    install_tarball_binary \
+        "https://github.com/lsd-rs/lsd/releases/download/${tag}/lsd-${tag}-${target}.tar.gz" \
+        lsd lsd
+}
+
+# ──────────────────────────────────────────────────────────────
 # Helper: install a CLI tool that also ships as a Rust crate. Tries the OS
-# package manager first (via pkg_install), then falls back to `cargo install`
-# when the package is missing or unfetchable. cargo builds from source, so it
-# works on any arch/libc as long as the Rust toolchain is present (it is by the
-# time these run — see the INSTALL_RUST block). Returns nonzero if neither path
-# is available, so a single unavailable tool never aborts the whole install.
-#   $1 = OS package name   $2 = cargo crate name
+# package manager first (via pkg_install), then an optional prebuilt binary,
+# then falls back to `cargo install`. cargo builds from source, so it works on
+# any arch/libc as long as the Rust toolchain is present (it is by the time
+# these run — see the INSTALL_RUST block), but it's the slowest and most
+# fragile path — hence prebuilt is preferred when available. Returns nonzero if
+# no path works, so a single unavailable tool never aborts the whole install.
+#   $1 = OS package name   $2 = cargo crate name   $3 = prebuilt installer fn (optional)
 # ──────────────────────────────────────────────────────────────
 install_rust_cli() {
-    local pkg="$1" crate="$2"
+    local pkg="$1" crate="$2" prebuilt_fn="${3:-}"
     if pkg_install "$pkg"; then
         return 0
     fi
     echo "  ⚠️  '$pkg' unavailable via $PKG_MANAGER."
+    if [ "$IS_MACOS" != true ] && [ -n "$prebuilt_fn" ]; then
+        echo "  📥 Trying prebuilt binary for $pkg..."
+        if "$prebuilt_fn"; then
+            echo "  ✔ Installed $pkg from a prebuilt binary"
+            return 0
+        fi
+        echo "  ⚠️  No usable prebuilt binary for $pkg."
+    fi
     if command -v cargo &>/dev/null; then
         echo "  📥 Falling back to: cargo install $crate"
         cargo install "$crate" && return 0
@@ -306,9 +397,11 @@ fi
 # Install ripgrep
 if [ "$INSTALL_RIPGREP" = true ]; then
     echo "🔍 Installing ripgrep..."
-    # Package is named "ripgrep" on every supported manager; the "ripgrep"
-    # crate (binary: rg) is the cargo fallback when the repo can't provide it.
-    install_rust_cli ripgrep ripgrep
+    # Package is named "ripgrep" on every supported manager. If the repo can't
+    # provide it, prefer a prebuilt binary (BurntSushi ships them) and only fall
+    # back to `cargo install ripgrep` (binary: rg) as a last resort — building
+    # regex-syntax from source can segfault rustc on small aarch64 VMs.
+    install_rust_cli ripgrep ripgrep install_ripgrep_prebuilt
 fi
 
 # Install fd
@@ -331,10 +424,23 @@ if [ "$INSTALL_FD" = true ]; then
         pkg_install fd && fd_ok=true
     fi
 
-    # Fallback: the "fd-find" crate installs a binary named "fd" straight into
-    # ~/.cargo/bin (already on PATH), so no symlink dance is needed here.
+    # Fallbacks when the package manager couldn't provide fd. Prefer a prebuilt
+    # binary (avoids a from-source cargo build that can segfault rustc on small
+    # aarch64 VMs); the "fd-find" crate installs a binary named "fd" straight
+    # into ~/.cargo/bin (already on PATH), so no symlink dance is needed there.
     if [ "$fd_ok" != true ]; then
         echo "  ⚠️  fd unavailable via $PKG_MANAGER."
+        if [ "$IS_MACOS" != true ]; then
+            echo "  📥 Trying prebuilt binary for fd..."
+            if install_fd_prebuilt; then
+                echo "  ✔ Installed fd from a prebuilt binary"
+                fd_ok=true
+            else
+                echo "  ⚠️  No usable prebuilt binary for fd."
+            fi
+        fi
+    fi
+    if [ "$fd_ok" != true ]; then
         if command -v cargo &>/dev/null; then
             echo "  📥 Falling back to: cargo install fd-find"
             cargo install fd-find || echo "  ❌ Could not install fd. Skipping."
@@ -436,8 +542,9 @@ fi
 # Install lsd
 if [ "$INSTALL_LSD" = true ]; then
     echo "🚀 Installing lsd..."
-    # "lsd" crate (binary: lsd) is the cargo fallback for distros that lack it.
-    install_rust_cli lsd lsd
+    # Repo package first, then a prebuilt binary (lsd-rs ships static musl
+    # builds), then the "lsd" crate (binary: lsd) as a from-source last resort.
+    install_rust_cli lsd lsd install_lsd_prebuilt
 fi
 
 # Initialize and update git submodules (nvim, tmux configs, etc.)
