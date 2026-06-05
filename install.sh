@@ -81,6 +81,49 @@ append_block_to_shell_rcs() {
     done
 }
 
+# ──────────────────────────────────────────────────────────────
+# Helper: install one or more packages via the detected package manager,
+# tolerating the transient failures that otherwise abort the whole script
+# under `set -e`. On apt a 404 is usually a stale index/pool mismatch (common
+# on dev releases), so we refresh the index and retry once with --fix-missing.
+# Returns nonzero if the package still can't be installed, letting callers
+# decide whether to fall back to another install method.
+# ──────────────────────────────────────────────────────────────
+pkg_install() {
+    if $INSTALL_CMD "$@"; then
+        return 0
+    fi
+    if [ "$PKG_MANAGER" = "apt-get" ]; then
+        echo "  ⚠️  apt install failed; refreshing index and retrying..."
+        sudo apt-get update || true
+        $INSTALL_CMD --fix-missing "$@" && return 0
+    fi
+    return 1
+}
+
+# ──────────────────────────────────────────────────────────────
+# Helper: install a CLI tool that also ships as a Rust crate. Tries the OS
+# package manager first (via pkg_install), then falls back to `cargo install`
+# when the package is missing or unfetchable. cargo builds from source, so it
+# works on any arch/libc as long as the Rust toolchain is present (it is by the
+# time these run — see the INSTALL_RUST block). Returns nonzero if neither path
+# is available, so a single unavailable tool never aborts the whole install.
+#   $1 = OS package name   $2 = cargo crate name
+# ──────────────────────────────────────────────────────────────
+install_rust_cli() {
+    local pkg="$1" crate="$2"
+    if pkg_install "$pkg"; then
+        return 0
+    fi
+    echo "  ⚠️  '$pkg' unavailable via $PKG_MANAGER."
+    if command -v cargo &>/dev/null; then
+        echo "  📥 Falling back to: cargo install $crate"
+        cargo install "$crate" && return 0
+    fi
+    echo "  ❌ Could not install '$pkg' (no cargo for fallback). Skipping."
+    return 1
+}
+
 # Function to install dependencies from a dependencies file
 install_dependencies() {
     local dir="$1"
@@ -105,7 +148,7 @@ install_dependencies() {
             echo "  ✔ $dep already installed"
         else
             echo "  📥 Installing $dep..."
-            $INSTALL_CMD "$dep"
+            pkg_install "$dep" || echo "  ⚠️  Could not install $dep; continuing."
         fi
     done < "$deps_file"
 }
@@ -158,7 +201,7 @@ fi
 # Install zsh
 if [ "$INSTALL_ZSH" = true ]; then
     echo "🐚 Installing zsh..."
-    $INSTALL_CMD zsh
+    pkg_install zsh
 
     # Make zsh the default shell
     echo "🔧 Setting zsh as default shell..."
@@ -190,16 +233,16 @@ if [ "$PKG_MANAGER" = "apt-get" ]; then
     # build-essential pull its own if none is found explicitly.
     libstdcxx_dev=$(apt-cache --names-only search '^libstdc\+\+-[0-9]+-dev$' 2>/dev/null \
         | awk '{print $1}' | sort -V | tail -n1)
-    $INSTALL_CMD build-essential ${libstdcxx_dev:-} curl git unzip jq
+    pkg_install build-essential ${libstdcxx_dev:-} curl git unzip jq
 elif [ "$PKG_MANAGER" = "dnf" ]; then
-    $INSTALL_CMD gcc gcc-c++ make libstdc++-devel curl git unzip jq
+    pkg_install gcc gcc-c++ make libstdc++-devel curl git unzip jq
 elif [ "$PKG_MANAGER" = "pacman" ]; then
-    $INSTALL_CMD base-devel curl git unzip jq
+    pkg_install base-devel curl git unzip jq
 elif [ "$PKG_MANAGER" = "brew" ]; then
     # Compiler toolchain comes from the Xcode Command Line Tools.
     # Returns non-zero if already installed, so don't let set -e abort.
     xcode-select --install 2>/dev/null || true
-    $INSTALL_CMD curl git unzip jq
+    pkg_install curl git unzip jq
 fi
 
 # Bootstrap the zsh configuration.
@@ -263,39 +306,66 @@ fi
 # Install ripgrep
 if [ "$INSTALL_RIPGREP" = true ]; then
     echo "🔍 Installing ripgrep..."
-    # Package is named "ripgrep" on every supported manager.
-    $INSTALL_CMD ripgrep
+    # Package is named "ripgrep" on every supported manager; the "ripgrep"
+    # crate (binary: rg) is the cargo fallback when the repo can't provide it.
+    install_rust_cli ripgrep ripgrep
 fi
 
 # Install fd
 if [ "$INSTALL_FD" = true ]; then
     echo "🔎 Installing fd..."
+    fd_ok=false
     if [ "$PKG_MANAGER" = "apt-get" ]; then
         # Debian/Ubuntu ship the binary as "fdfind"; symlink it to "fd".
-        $INSTALL_CMD fd-find
-        mkdir -p "$HOME/.local/bin"
-        if [ -x /usr/bin/fdfind ] && [ ! -e "$HOME/.local/bin/fd" ]; then
-            ln -s /usr/bin/fdfind "$HOME/.local/bin/fd"
+        if pkg_install fd-find; then
+            fd_ok=true
+            mkdir -p "$HOME/.local/bin"
+            if [ -x /usr/bin/fdfind ] && [ ! -e "$HOME/.local/bin/fd" ]; then
+                ln -s /usr/bin/fdfind "$HOME/.local/bin/fd"
+            fi
+            append_to_shell_rc 'export PATH="$HOME/.local/bin:$PATH"'
         fi
-        append_to_shell_rc 'export PATH="$HOME/.local/bin:$PATH"'
     elif [ "$PKG_MANAGER" = "dnf" ]; then
-        $INSTALL_CMD fd-find
+        pkg_install fd-find && fd_ok=true
     elif [ "$PKG_MANAGER" = "pacman" ] || [ "$PKG_MANAGER" = "brew" ]; then
-        $INSTALL_CMD fd
+        pkg_install fd && fd_ok=true
+    fi
+
+    # Fallback: the "fd-find" crate installs a binary named "fd" straight into
+    # ~/.cargo/bin (already on PATH), so no symlink dance is needed here.
+    if [ "$fd_ok" != true ]; then
+        echo "  ⚠️  fd unavailable via $PKG_MANAGER."
+        if command -v cargo &>/dev/null; then
+            echo "  📥 Falling back to: cargo install fd-find"
+            cargo install fd-find || echo "  ❌ Could not install fd. Skipping."
+        else
+            echo "  ❌ Could not install fd (no cargo for fallback). Skipping."
+        fi
     fi
 fi
 
 # Install tmux
 if [ "$INSTALL_TMUX" = true ]; then
     echo "🖥️  Installing tmux..."
-    $INSTALL_CMD tmux
+    pkg_install tmux || echo "  ⚠️  Could not install tmux; continuing."
 fi
 
 # Install fzf
 if [ "$INSTALL_FZF" = true ]; then
     echo "🔍 Installing fzf..."
-    # Package is named "fzf" on every supported manager.
-    $INSTALL_CMD fzf
+    # Package is named "fzf" on every supported manager. When the repo lacks it
+    # (older Debian/Ubuntu), fall back to the upstream git installer, which
+    # fetches a prebuilt binary into ~/.fzf/bin.
+    if ! pkg_install fzf; then
+        echo "  ⚠️  fzf unavailable via $PKG_MANAGER; installing from git..."
+        if [ ! -d "$HOME/.fzf" ]; then
+            git clone --depth 1 https://github.com/junegunn/fzf.git "$HOME/.fzf"
+        fi
+        "$HOME/.fzf/install" --bin --no-update-rc
+        mkdir -p "$HOME/.local/bin"
+        ln -sf "$HOME/.fzf/bin/fzf" "$HOME/.local/bin/fzf"
+        append_to_shell_rc 'export PATH="$HOME/.local/bin:$PATH"'
+    fi
 fi
 
 # Install polybar (X11-only, not available on macOS)
@@ -304,7 +374,7 @@ if [ "$INSTALL_POLYBAR" = true ]; then
         echo "⏭️  Skipping polybar (Linux/X11-only, not available on macOS)"
     else
         echo "🪟 Installing polybar..."
-        $INSTALL_CMD polybar
+        pkg_install polybar || echo "  ⚠️  Could not install polybar; continuing."
     fi
 fi
 
@@ -315,9 +385,9 @@ if [ "$INSTALL_I3" = true ]; then
     else
         echo "🪟 Installing i3..."
         if [ "$PKG_MANAGER" = "pacman" ]; then
-            $INSTALL_CMD i3-wm
+            pkg_install i3-wm || echo "  ⚠️  Could not install i3-wm; continuing."
         else
-            $INSTALL_CMD i3
+            pkg_install i3 || echo "  ⚠️  Could not install i3; continuing."
         fi
     fi
 fi
@@ -346,9 +416,10 @@ if [ "$INSTALL_ALACRITTY" = true ]; then
             fi
         fi
         # If we didn't build it from cargo above, install via apt now.
-        command -v alacritty &>/dev/null || $INSTALL_CMD alacritty
+        command -v alacritty &>/dev/null || pkg_install alacritty || \
+            echo "  ⚠️  Could not install alacritty; continuing."
     else
-        $INSTALL_CMD alacritty
+        pkg_install alacritty || echo "  ⚠️  Could not install alacritty; continuing."
     fi
 fi
 
@@ -358,14 +429,15 @@ if [ "$INSTALL_ROFI" = true ]; then
         echo "⏭️  Skipping rofi (Linux/X11-only, not available on macOS)"
     else
         echo "🚀 Installing rofi..."
-        $INSTALL_CMD rofi
+        pkg_install rofi || echo "  ⚠️  Could not install rofi; continuing."
     fi
 fi
 
 # Install lsd
 if [ "$INSTALL_LSD" = true ]; then
     echo "🚀 Installing lsd..."
-    $INSTALL_CMD lsd
+    # "lsd" crate (binary: lsd) is the cargo fallback for distros that lack it.
+    install_rust_cli lsd lsd
 fi
 
 # Initialize and update git submodules (nvim, tmux configs, etc.)
