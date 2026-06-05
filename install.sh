@@ -94,7 +94,12 @@ pkg_install() {
         return 0
     fi
     if [ "$PKG_MANAGER" = "apt-get" ]; then
-        echo "  ⚠️  apt install failed; refreshing index and retrying..."
+        # A plain `apt-get update` keeps the cached InRelease (the logs show
+        # "Hit:" not "Get:"), so a stale Packages index that points at pool
+        # versions which 404 is never actually refreshed. Wipe the lists to
+        # force a genuine re-download, then retry once with --fix-missing.
+        echo "  ⚠️  apt install failed; forcing a full index refresh and retrying..."
+        sudo rm -rf /var/lib/apt/lists/* || true
         sudo apt-get update || true
         $INSTALL_CMD --fix-missing "$@" && return 0
     fi
@@ -677,11 +682,16 @@ if [ "$INSTALL_POLYBAR" = true ] && [ "$IS_MACOS" != true ]; then
     fi
 fi
 
-# Run i3 init script (Linux/X11-only)
+# Run i3 init script (Linux/X11-only). Skip if i3 itself failed to install —
+# otherwise init.sh just errors out on a missing i3-msg.
 if [ "$INSTALL_I3" = true ] && [ "$IS_MACOS" != true ]; then
-    if [ -f "$CONFIG_DIR/i3/init.sh" ]; then
+    if ! command -v i3 &>/dev/null; then
+        echo "⚠️  i3 not installed; skipping i3 initialization"
+    elif [ -f "$CONFIG_DIR/i3/init.sh" ]; then
         echo "🔧 Running i3 initialization..."
-        bash "$CONFIG_DIR/i3/init.sh"
+        # Run from the i3 config dir: init.sh references its helper scripts by
+        # relative path, so it needs that as its working directory.
+        ( cd "$CONFIG_DIR/i3" && bash init.sh )
         echo "✔ i3 initialized"
     else
         echo "⚠️  i3 init.sh not found, skipping"
