@@ -607,7 +607,7 @@ echo "📦 Initializing git submodules..."
 if command -v git &>/dev/null; then
     if [ -f "$DOTFILES_DIR/.gitmodules" ]; then
         echo "🔐 Initializing submodules using HTTPS for github.com URLs (temporary)..."
-        git -c 'url."https://github.com/".insteadOf=git@github.com:' -C "$DOTFILES_DIR" submodule update --init --recursive
+        git -c 'url.https://github.com/.insteadOf=git@github.com:' -C "$DOTFILES_DIR" submodule update --init --recursive
         echo "✔ Submodules initialized using temporary HTTPS override"
     else
         echo "⚠️  No .gitmodules found, skipping submodule init"
