@@ -184,6 +184,68 @@ install_lsd_prebuilt() {
 }
 
 # ──────────────────────────────────────────────────────────────
+# Install Alacritty from source on Debian/Ubuntu, following the official
+# INSTALL.md (https://github.com/alacritty/alacritty/blob/master/INSTALL.md).
+# Alacritty isn't reliably packaged in apt — it's missing from older repos and
+# the third-party aslatter PPA lags / breaks across releases — so upstream's
+# supported path is a cargo build. We compile the latest release tag, then
+# install the binary, terminfo, and desktop entry. Requires the Rust toolchain,
+# which the INSTALL_RUST block installs earlier in this script.
+# Returns nonzero on any failure so the caller can warn-and-continue.
+# ──────────────────────────────────────────────────────────────
+install_alacritty_from_source() {
+    if ! command -v cargo &>/dev/null; then
+        echo "  ❌ cargo not available; cannot build alacritty from source."
+        return 1
+    fi
+
+    # Build/runtime deps from INSTALL.md (scdoc is for the man pages).
+    sudo apt-get install -y cmake g++ pkg-config libfontconfig1-dev \
+        libxcb-xfixes0-dev libxkbcommon-dev python3 scdoc || return 1
+
+    local tag src
+    tag="$(github_latest_tag alacritty/alacritty)"
+    src="$(mktemp -d)" || return 1
+
+    # Shallow-clone the latest release tag (fall back to the default branch if
+    # the tag lookup failed).
+    if [ -n "$tag" ]; then
+        git clone --depth 1 --branch "$tag" \
+            https://github.com/alacritty/alacritty.git "$src" || { rm -rf "$src"; return 1; }
+    else
+        git clone --depth 1 \
+            https://github.com/alacritty/alacritty.git "$src" || { rm -rf "$src"; return 1; }
+    fi
+
+    ( cd "$src" && cargo build --release ) || { rm -rf "$src"; return 1; }
+
+    # Binary → ~/.local/bin (already on PATH elsewhere), so no sudo needed here.
+    mkdir -p "$HOME/.local/bin"
+    install -m 0755 "$src/target/release/alacritty" "$HOME/.local/bin/alacritty" \
+        || { rm -rf "$src"; return 1; }
+    append_to_shell_rc 'export PATH="$HOME/.local/bin:$PATH"'
+    export PATH="$HOME/.local/bin:$PATH"
+
+    # Terminfo so TERM=alacritty works. Run as a normal user, tic installs to
+    # ~/.terminfo, so no sudo is required.
+    if command -v tic &>/dev/null; then
+        tic -xe alacritty,alacritty-direct "$src/extra/alacritty.info" 2>/dev/null \
+            || echo "  ⚠️  Could not install alacritty terminfo; continuing."
+    fi
+
+    # Desktop entry + icon so it shows up in app launchers (needs sudo; best
+    # effort — a headless box may lack desktop-file-utils).
+    if [ -f "$src/extra/linux/Alacritty.desktop" ]; then
+        sudo cp "$src/extra/logo/alacritty-term.svg" /usr/share/pixmaps/Alacritty.svg 2>/dev/null || true
+        sudo desktop-file-install "$src/extra/linux/Alacritty.desktop" 2>/dev/null || true
+        sudo update-desktop-database 2>/dev/null || true
+    fi
+
+    rm -rf "$src"
+    return 0
+}
+
+# ──────────────────────────────────────────────────────────────
 # Helper: install a CLI tool that also ships as a Rust crate. Tries the OS
 # package manager first (via pkg_install), then an optional prebuilt binary,
 # then falls back to `cargo install`. cargo builds from source, so it works on
@@ -505,25 +567,14 @@ if [ "$INSTALL_ALACRITTY" = true ]; then
         # On macOS alacritty is distributed as a cask.
         brew install --cask alacritty
     elif [ "$PKG_MANAGER" = "apt-get" ]; then
-        # alacritty isn't in older Ubuntu/Debian repos. If apt can't see it,
-        # add the maintainer PPA (Ubuntu) and retry.
-        if ! apt-cache show alacritty &>/dev/null; then
-            if grep -qi ubuntu /etc/os-release 2>/dev/null; then
-                echo "  alacritty not in apt; adding ppa:aslatter/ppa..."
-                sudo apt-get install -y software-properties-common
-                sudo add-apt-repository -y ppa:aslatter/ppa
-                sudo apt-get update
-            else
-                echo "  ⚠️  alacritty not in apt and PPAs only work on Ubuntu."
-                echo "     Falling back to building from source with cargo..."
-                sudo apt-get install -y cmake pkg-config libfreetype6-dev \
-                    libfontconfig1-dev libxcb-xfixes0-dev libxkbcommon-dev python3
-                cargo install alacritty
-            fi
+        # Alacritty has no official Debian/Ubuntu package, so follow upstream's
+        # INSTALL.md and build it from source with cargo (installs the binary,
+        # terminfo, and desktop entry). See install_alacritty_from_source above.
+        if install_alacritty_from_source; then
+            echo "✔ alacritty built from source and installed"
+        else
+            echo "  ⚠️  Could not build alacritty from source; continuing."
         fi
-        # If we didn't build it from cargo above, install via apt now.
-        command -v alacritty &>/dev/null || pkg_install alacritty || \
-            echo "  ⚠️  Could not install alacritty; continuing."
     else
         pkg_install alacritty || echo "  ⚠️  Could not install alacritty; continuing."
     fi
