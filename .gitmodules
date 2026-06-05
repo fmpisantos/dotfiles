@@ -4,6 +4,7 @@
 [submodule "config/i3"]
 	path = config/i3
 	url = git@github.com:fmpisantos/i3
+	branch = nokia
 [submodule "config/nvim"]
 	path = config/nvim
 	url = git@github.com:fmpisantos/nvim

@@ -20,19 +20,19 @@ ZSH_PROFILE="$HOME/.zprofile"
 # Application toggle list
 # Set to true/false to enable/disable installation of each app.
 # ──────────────────────────────────────────────────────────────
-INSTALL_ZSH=true
-INSTALL_RUST=true
-INSTALL_NEOVIM=true # requires rust (bob is built with cargo)
-INSTALL_RIPGREP=true
-INSTALL_FD=true
-INSTALL_TMUX=true
-INSTALL_FZF=true
-INSTALL_POLYBAR=true
+INSTALL_ZSH=false
+INSTALL_RUST=false
+INSTALL_NEOVIM=false # requires rust (bob is built with cargo)
+INSTALL_RIPGREP=false
+INSTALL_FD=false
+INSTALL_TMUX=false
+INSTALL_FZF=false
+INSTALL_POLYBAR=false
 INSTALL_I3=true
-INSTALL_ALACRITTY=true
-INSTALL_ROFI=true
-INSTALL_FONTS=true
-INSTALL_LSD=true # alternative to ls
+INSTALL_ALACRITTY=false
+INSTALL_ROFI=false
+INSTALL_FONTS=false
+INSTALL_LSD=false # alternative to ls
 # ──────────────────────────────────────────────────────────────
 
 # ──────────────────────────────────────────────────────────────
