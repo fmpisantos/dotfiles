@@ -183,7 +183,14 @@ fi
 echo "🔨 Installing build dependencies..."
 # jq + unzip are needed by fonts.sh; curl/git are needed throughout.
 if [ "$PKG_MANAGER" = "apt-get" ]; then
-    $INSTALL_CMD build-essential libstdc++-10-dev curl git unzip jq
+    # build-essential pulls in g++, which depends on the libstdc++-N-dev that
+    # matches this release's GCC. The version isn't stable across Ubuntu
+    # releases (10 on 20.04, 12 on 22.04, 14 on 24.04...), so don't hardcode it.
+    # Pick the highest libstdc++-*-dev apt actually offers; fall back to letting
+    # build-essential pull its own if none is found explicitly.
+    libstdcxx_dev=$(apt-cache --names-only search '^libstdc\+\+-[0-9]+-dev$' 2>/dev/null \
+        | awk '{print $1}' | sort -V | tail -n1)
+    $INSTALL_CMD build-essential ${libstdcxx_dev:-} curl git unzip jq
 elif [ "$PKG_MANAGER" = "dnf" ]; then
     $INSTALL_CMD gcc gcc-c++ make libstdc++-devel curl git unzip jq
 elif [ "$PKG_MANAGER" = "pacman" ]; then
