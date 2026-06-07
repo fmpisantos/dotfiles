@@ -130,8 +130,73 @@ pkg_install() {
         sudo rm -rf /var/lib/apt/lists/* || true
         sudo apt-get update || true
         $INSTALL_CMD --fix-missing "$@" && return 0
+
+        # Still failing after a clean index re-download means the problem isn't a
+        # stale local cache — it's the mirror itself. Regional mirrors lag or only
+        # partially carry non-amd64 arches, so their index advertises a .deb their
+        # pool 404s on (exactly the "Failed to fetch ... 404 Not Found" seen for
+        # arm64 i3/qt6 deps). Repoint at Ubuntu's canonical archive (once) and
+        # retry — those archives are always self-consistent.
+        if apt_switch_to_canonical_mirror; then
+            echo "  🔁 Retrying install against the canonical archive..."
+            $INSTALL_CMD "$@" && return 0
+            $INSTALL_CMD --fix-missing "$@" && return 0
+        fi
     fi
     return 1
+}
+
+# ──────────────────────────────────────────────────────────────
+# Helper (apt only): repoint apt at Ubuntu's canonical archive for this
+# machine's architecture, used as a last resort when a configured mirror keeps
+# 404ing. The canonical archives are split by arch:
+#   amd64 / i386    → archive.ubuntu.com/ubuntu    (security: security.ubuntu.com)
+#   everything else → ports.ubuntu.com/ubuntu-ports  (arm64, etc.)
+# On the "ports" arches the security pocket also lives under ubuntu-ports, so
+# security.ubuntu.com is redirected there too. Runs at most once per script run
+# (APT_MIRROR_SWITCHED guard). Rewrites only Ubuntu's own source files — the
+# deb822 ubuntu.sources (24.04+) and legacy sources.list — backing each up
+# first, and leaves third-party PPAs/.sources untouched. Returns nonzero when
+# there was nothing to change so the caller doesn't retry for no reason.
+# ──────────────────────────────────────────────────────────────
+APT_MIRROR_SWITCHED=false
+apt_switch_to_canonical_mirror() {
+    [ "$APT_MIRROR_SWITCHED" = true ] && return 1
+
+    local arch primary security
+    arch="$(dpkg --print-architecture 2>/dev/null)"
+    case "$arch" in
+        amd64|i386)
+            primary="http://archive.ubuntu.com/ubuntu"
+            security="http://security.ubuntu.com/ubuntu" ;;
+        *)
+            primary="http://ports.ubuntu.com/ubuntu-ports"
+            security="http://ports.ubuntu.com/ubuntu-ports" ;;
+    esac
+
+    echo "  🌐 Mirror still 404ing; repointing apt at Ubuntu's canonical archive for $arch..."
+    local changed=false f
+    for f in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+        [ -f "$f" ] || continue
+        sudo cp -n "$f" "$f.dotfiles.bak" 2>/dev/null || true
+        # Any "*archive.ubuntu.com/ubuntu" mirror → the primary archive;
+        # "security.ubuntu.com/ubuntu" → the security archive. (archive.ubuntu.com
+        # itself maps to itself, which is harmless.)
+        sudo sed -i -E \
+            -e "s#https?://[A-Za-z0-9._-]*archive\.ubuntu\.com/ubuntu#${primary}#g" \
+            -e "s#https?://security\.ubuntu\.com/ubuntu#${security}#g" \
+            "$f" && changed=true
+    done
+
+    if [ "$changed" != true ]; then
+        echo "  ⚠️  No Ubuntu apt source files found to update."
+        return 1
+    fi
+
+    APT_MIRROR_SWITCHED=true
+    sudo rm -rf /var/lib/apt/lists/* || true
+    sudo apt-get update || true
+    return 0
 }
 
 # ──────────────────────────────────────────────────────────────
@@ -232,8 +297,10 @@ install_alacritty_from_source() {
         return 1
     fi
 
-    # Build/runtime deps from INSTALL.md (scdoc is for the man pages).
-    sudo apt-get install -y cmake g++ pkg-config libfontconfig1-dev \
+    # Build/runtime deps from INSTALL.md (scdoc is for the man pages). Routed
+    # through pkg_install so a 404ing mirror triggers the canonical-archive
+    # fallback instead of aborting the build.
+    pkg_install cmake g++ pkg-config libfontconfig1-dev \
         libxcb-xfixes0-dev libxkbcommon-dev python3 scdoc || return 1
 
     local tag src
