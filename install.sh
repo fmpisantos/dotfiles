@@ -5,6 +5,33 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 DOTFILES_DIR="$SCRIPT_DIR"
 CONFIG_DIR="$HOME/.config"
 
+# ──────────────────────────────────────────────────────────────
+# Error logging.
+# The log file name is stamped with the run's start time, but the file itself
+# is only created the first time log_error is called (via >>), so a clean run
+# never leaves an empty error_<timestamp>.log behind. Every tolerated failure
+# below routes through log_error so the run can continue while still recording
+# what went wrong; an ERR trap catches any unguarded failure that aborts the
+# script under `set -e`.
+# ──────────────────────────────────────────────────────────────
+ERROR_LOG="$SCRIPT_DIR/error_$(date +%Y%m%d_%H%M%S).log"
+ERROR_COUNT=0
+
+log_error() {
+    local msg="$1"
+    ERROR_COUNT=$((ERROR_COUNT + 1))
+    printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$msg" >> "$ERROR_LOG"
+    echo "  ⚠️  $msg (logged to $ERROR_LOG)"
+}
+
+# Catch any failure that isn't guarded by `|| ...` and would otherwise abort
+# the script under `set -e`, recording the command and line before exiting.
+on_error() {
+    local exit_code=$1 line=$2 cmd=$3
+    log_error "Aborted: command '$cmd' failed (exit $exit_code) at install.sh:$line"
+}
+trap 'on_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
+
 # Files the shell-rc helpers append to for zsh:
 #   ZSH_RC      → interactive rc (shell functions)  — .zshrc
 #   ZSH_PROFILE → login env (PATH / exports)        — .zprofile
@@ -33,6 +60,7 @@ INSTALL_ALACRITTY=false
 INSTALL_ROFI=false
 INSTALL_FONTS=false
 INSTALL_LSD=false # alternative to ls
+INSTALL_AGENT_HELPERS=false # git worktree helper functions in .zshrc/.bashrc
 # ──────────────────────────────────────────────────────────────
 
 # ──────────────────────────────────────────────────────────────
@@ -278,7 +306,7 @@ install_rust_cli() {
         echo "  📥 Falling back to: cargo install $crate"
         cargo install "$crate" && return 0
     fi
-    echo "  ❌ Could not install '$pkg' (no cargo for fallback). Skipping."
+    log_error "Could not install '$pkg' (no working path: $PKG_MANAGER, prebuilt, or cargo). Skipping."
     return 1
 }
 
@@ -306,7 +334,7 @@ install_dependencies() {
             echo "  ✔ $dep already installed"
         else
             echo "  📥 Installing $dep..."
-            pkg_install "$dep" || echo "  ⚠️  Could not install $dep; continuing."
+            pkg_install "$dep" || log_error "Could not install dependency '$dep' for $dir_name"
         fi
     done < "$deps_file"
 }
@@ -510,9 +538,9 @@ if [ "$INSTALL_FD" = true ]; then
     if [ "$fd_ok" != true ]; then
         if command -v cargo &>/dev/null; then
             echo "  📥 Falling back to: cargo install fd-find"
-            cargo install fd-find || echo "  ❌ Could not install fd. Skipping."
+            cargo install fd-find || log_error "Could not install fd via cargo. Skipping."
         else
-            echo "  ❌ Could not install fd (no cargo for fallback). Skipping."
+            log_error "Could not install fd (no cargo for fallback). Skipping."
         fi
     fi
 fi
@@ -520,7 +548,7 @@ fi
 # Install tmux
 if [ "$INSTALL_TMUX" = true ]; then
     echo "🖥️  Installing tmux..."
-    pkg_install tmux || echo "  ⚠️  Could not install tmux; continuing."
+    pkg_install tmux || log_error "Could not install tmux; continuing."
 fi
 
 # Install fzf
@@ -547,7 +575,7 @@ if [ "$INSTALL_POLYBAR" = true ]; then
         echo "⏭️  Skipping polybar (Linux/X11-only, not available on macOS)"
     else
         echo "🪟 Installing polybar..."
-        pkg_install polybar || echo "  ⚠️  Could not install polybar; continuing."
+        pkg_install polybar || log_error "Could not install polybar; continuing."
     fi
 fi
 
@@ -558,9 +586,9 @@ if [ "$INSTALL_I3" = true ]; then
     else
         echo "🪟 Installing i3..."
         if [ "$PKG_MANAGER" = "pacman" ]; then
-            pkg_install i3-wm || echo "  ⚠️  Could not install i3-wm; continuing."
+            pkg_install i3-wm || log_error "Could not install i3-wm; continuing."
         else
-            pkg_install i3 || echo "  ⚠️  Could not install i3; continuing."
+            pkg_install i3 || log_error "Could not install i3; continuing."
         fi
     fi
 fi
@@ -578,10 +606,10 @@ if [ "$INSTALL_ALACRITTY" = true ]; then
         if install_alacritty_from_source; then
             echo "✔ alacritty built from source and installed"
         else
-            echo "  ⚠️  Could not build alacritty from source; continuing."
+            log_error "Could not build alacritty from source; continuing."
         fi
     else
-        pkg_install alacritty || echo "  ⚠️  Could not install alacritty; continuing."
+        pkg_install alacritty || log_error "Could not install alacritty; continuing."
     fi
 fi
 
@@ -591,7 +619,7 @@ if [ "$INSTALL_ROFI" = true ]; then
         echo "⏭️  Skipping rofi (Linux/X11-only, not available on macOS)"
     else
         echo "🚀 Installing rofi..."
-        pkg_install rofi || echo "  ⚠️  Could not install rofi; continuing."
+        pkg_install rofi || log_error "Could not install rofi; continuing."
     fi
 fi
 
@@ -713,6 +741,7 @@ fi
 # Install git worktree "agent" helper functions into both
 # ~/.zshrc and ~/.bashrc.
 # ──────────────────────────────────────────────────────────────
+if [ "$INSTALL_AGENT_HELPERS" = true ]; then
 echo "🧩 Installing agent helper functions into shell rc files..."
 AGENT_FUNCTIONS_BLOCK=$(cat <<'AGENT_FUNCTIONS_EOF'
 list-agents() {
@@ -818,9 +847,17 @@ new-agent() {
 AGENT_FUNCTIONS_EOF
 )
 append_block_to_shell_rcs "# >>> dotfiles: agent worktree helpers >>>" "$AGENT_FUNCTIONS_BLOCK"
+else
+    echo "⏭️  Skipping agent helper functions (INSTALL_AGENT_HELPERS=false)"
+fi
 
 echo ""
-echo "✨ Installation complete! ✨"
+if [ "$ERROR_COUNT" -gt 0 ]; then
+    echo "⚠️  Installation completed with $ERROR_COUNT error(s)."
+    echo "   See the log for details: $ERROR_LOG"
+else
+    echo "✨ Installation complete! ✨"
+fi
 echo ""
 echo "📝 Notes:"
 echo "  • zsh will be your default shell after you log out and back in"
