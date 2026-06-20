@@ -47,7 +47,7 @@ ZSH_PROFILE="$HOME/.zprofile"
 # Application toggle list
 # Set to true/false to enable/disable installation of each app.
 # ──────────────────────────────────────────────────────────────
-INSTALL_ZSH=false
+INSTALL_ZSH=true
 INSTALL_RUST=false
 INSTALL_NEOVIM=false # requires rust (bob is built with cargo)
 INSTALL_RIPGREP=false
@@ -55,7 +55,7 @@ INSTALL_FD=false
 INSTALL_TMUX=false
 INSTALL_FZF=false
 INSTALL_POLYBAR=false
-INSTALL_I3=true
+INSTALL_I3=false
 INSTALL_ALACRITTY=false
 INSTALL_ROFI=false
 INSTALL_FONTS=false
@@ -720,11 +720,36 @@ fi
 echo "📁 Creating ~/.config directory..."
 mkdir -p "$CONFIG_DIR"
 
+# ──────────────────────────────────────────────────────────────
+# Helper: is the app behind a given config directory enabled?
+# Maps a config/<name> directory to its INSTALL_<NAME> toggle so the
+# dependency-install and symlink loops below only act on enabled apps.
+# Directories with no matching toggle (e.g. shared/standalone config) default
+# to enabled so they keep working as before.
+# ──────────────────────────────────────────────────────────────
+config_enabled() {
+    case "$1" in
+        zsh)       [ "$INSTALL_ZSH" = true ] ;;
+        nvim)      [ "$INSTALL_NEOVIM" = true ] ;;
+        tmux)      [ "$INSTALL_TMUX" = true ] ;;
+        polybar)   [ "$INSTALL_POLYBAR" = true ] ;;
+        i3)        [ "$INSTALL_I3" = true ] ;;
+        alacritty) [ "$INSTALL_ALACRITTY" = true ] ;;
+        rofi)      [ "$INSTALL_ROFI" = true ] ;;
+        *)         return 0 ;;
+    esac
+}
+
 # Install dependencies for each config directory
 echo "🔗 Checking for dependencies in config directories..."
 for item in "$DOTFILES_DIR/config/"/*; do
     if [ -d "$item" ] && [ -f "$item/dependencies" ]; then
-        install_dependencies "$item"
+        name=$(basename "$item")
+        if config_enabled "$name"; then
+            install_dependencies "$item"
+        else
+            echo "  ⏭️  Skipping $name dependencies (disabled in toggles)"
+        fi
     fi
 done
 
@@ -736,6 +761,13 @@ for item in "$DOTFILES_DIR"/config/*; do
     fi
     name=$(basename "$item")
     target="$CONFIG_DIR/$name"
+
+    # Only link config for enabled apps; a disabled app's config would just be
+    # a dead symlink pointing at a tool that isn't installed.
+    if ! config_enabled "$name"; then
+        echo "  Skipping $name (disabled in toggles)"
+        continue
+    fi
 
     # zsh is wired up by config/zsh/init.sh (symlinks ~/.config/zsh and
     # ~/.zshenv). Don't double-link it here — that would back up init.sh's
